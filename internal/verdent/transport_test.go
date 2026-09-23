@@ -26,7 +26,7 @@ func TestChromeFingerprintHasGREASE(t *testing.T) {
 	}
 
 	c, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
-		tls_client.WithClientProfile(profiles.Chrome_133),
+		tls_client.WithClientProfile(profiles.Chrome_146),
 		tls_client.WithInsecureSkipVerify(),
 		tls_client.WithTimeoutSeconds(10),
 		tls_client.WithRandomTLSExtensionOrder(),
