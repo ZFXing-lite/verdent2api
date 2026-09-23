@@ -130,7 +130,7 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 		tried[id] = true
 
-		token, terr := s.tokenFor(r.Context(), id)
+		token, deviceID, terr := s.tokenFor(r.Context(), id)
 		if terr != nil {
 			s.Pool.Record(id, pool.Result{OK: false, Class: pool.ClassAuthDead, Message: terr.Error()})
 			lastErr = terr
@@ -141,6 +141,7 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 			Model:       req.Model,
 			Messages:    req.Messages,
 			System:      "",
+			ConvID:      sticky,
 			MaxTokens:   req.MaxTokens,
 			Temperature: req.Temperature,
 			Stream:      true, // 上游始终用流式，本地按客户端需要聚合
@@ -152,7 +153,7 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		resp, serr := s.Client.Stream(r.Context(), token, body)
+		resp, serr := s.Client.Stream(r.Context(), token, deviceID, body)
 		if serr != nil {
 			cls, msg := classifyUpstream(serr)
 			s.Pool.Record(id, pool.Result{OK: false, Class: cls, Message: msg})
@@ -176,26 +177,29 @@ func (s *Server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	s.writeErr(w, status, code, msg)
 }
 
-// tokenFor 取账号的可用 token，过期则 refresh 并回写 store。
-func (s *Server) tokenFor(ctx context.Context, id string) (string, error) {
+// tokenFor 取账号的可用 token 与设备ID，过期则 refresh 并回写 store。
+func (s *Server) tokenFor(ctx context.Context, id string) (string, string, error) {
 	acc, ok := s.Store.Get(id)
 	if !ok {
-		return "", fmt.Errorf("account gone: %s", id)
+		return "", "", fmt.Errorf("account gone: %s", id)
 	}
 	if acc.Valid() {
-		return acc.Token, nil
+		dev, _ := s.Store.EnsureDeviceID(id)
+		return acc.Token, dev, nil
 	}
 	// 尝试 refresh。
 	refreshed, err := verdent.Refresh(ctx, s.HTTP, &acc)
 	if err != nil {
 		if acc.Token != "" {
 			// refresh 失败但仍有旧 token，赌一把（可能仍有效）。
-			return acc.Token, nil
+			dev, _ := s.Store.EnsureDeviceID(id)
+			return acc.Token, dev, nil
 		}
-		return "", fmt.Errorf("token expired and refresh failed: %w", err)
+		return "", "", fmt.Errorf("token expired and refresh failed: %w", err)
 	}
 	_ = s.Store.UpdateTokens(id, refreshed.Token, refreshed.RefreshToken, refreshed.ExpireAtMS)
-	return refreshed.Token, nil
+	dev, _ := s.Store.EnsureDeviceID(id)
+	return refreshed.Token, dev, nil
 }
 
 // relay 翻译 hybrid-stream SSE 为 OpenAI 格式并转发。

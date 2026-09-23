@@ -109,7 +109,7 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	acc, err := verdent.ExchangeCode(ctx, &http.Client{Timeout: 30 * time.Second}, code, pkce.Verifier)
+	acc, err := verdent.ExchangeCode(ctx, verdent.NewFingerprintClient(30*time.Second), code, pkce.Verifier)
 	if err != nil {
 		log.Fatalf("exchange code: %v", err)
 	}

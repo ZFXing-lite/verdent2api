@@ -61,7 +61,7 @@ func main() {
 		APIKey:   cfg.APIKey,
 		FreeOnly: cfg.FreeOnly,
 		Version:  version,
-		HTTP:     &http.Client{Timeout: 30 * time.Second},
+		HTTP:     verdent.NewFingerprintClient(30 * time.Second),
 	}
 	mux := http.NewServeMux()
 	srv.Register(mux)

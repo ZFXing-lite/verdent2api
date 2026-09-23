@@ -22,6 +22,8 @@ type Account struct {
 	Label        string `json:"label,omitempty"`
 	Token        string `json:"token"`
 	RefreshToken string `json:"refresh_token,omitempty"`
+	// DeviceID 模拟桌面端 MachineGuid，每账号唯一并持久化，避免多账号共享设备指纹。
+	DeviceID     string `json:"device_id,omitempty"`
 	// ExpireAtMS 是 access token 到期的 Unix 毫秒；0 表示未知（不主动判过期）。
 	ExpireAtMS   int64 `json:"expire_at_ms,omitempty"`
 	ObtainedAtMS int64 `json:"obtained_at_ms,omitempty"`
@@ -180,6 +182,29 @@ func (s *Store) UpdateTokens(id, token, refresh string, expireAtMS int64) error 
 		}
 	}
 	return fmt.Errorf("account not found: %s", id)
+}
+
+// EnsureDeviceID 返回账号的设备ID；若为空则生成唯一值并持久化，确保每账号
+// 拥有独立设备指纹而非共享同一硬编码值。落盘失败时内存值仍可用，不阻塞调用。
+func (s *Store) EnsureDeviceID(id string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.accounts {
+		if accountID(&s.accounts[i]) != id {
+			continue
+		}
+		if s.accounts[i].DeviceID != "" {
+			return s.accounts[i].DeviceID, nil
+		}
+		dev, err := hexRand(16)
+		if err != nil {
+			return "", err
+		}
+		s.accounts[i].DeviceID = dev
+		_ = s.saveLocked() // 尽量持久化；失败不致命，内存已一致
+		return dev, nil
+	}
+	return "", fmt.Errorf("account not found: %s", id)
 }
 
 func (s *Store) saveLocked() error {

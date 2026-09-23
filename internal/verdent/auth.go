@@ -91,10 +91,12 @@ func ExchangeCode(ctx context.Context, hc *http.Client, code, verifier string) (
 		return nil, fmt.Errorf("pkce ok but no token in data")
 	}
 	expSec := firstNumber(pr.Data.AccessTokenExpiresAt, pr.Data.ExpireTime)
+	dev, _ := hexRand(16)
 	acc := &Account{
 		UserID:       pr.Data.UserID.String(),
 		Token:        token,
 		RefreshToken: firstNonEmpty(pr.Data.RefreshToken, pr.Data.RefreshTokenAlt),
+		DeviceID:     dev,
 		ExpireAtMS:   expSec * 1000,
 		ObtainedAtMS: time.Now().UnixMilli(),
 	}

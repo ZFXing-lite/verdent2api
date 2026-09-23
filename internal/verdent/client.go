@@ -3,6 +3,8 @@ package verdent
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,8 +22,8 @@ const (
 	betaHeader  = "hybrid-stream@20250919"
 	versionCode = "2.15.1"
 	UserAgent   = "Verdent/2.15.1"
-	// deviceID 桌面版从注册表 MachineGuid 读取；此处用固定占位（对限免请求无影响）。
-	deviceID = "012c8d596e14c8623f58f2add22f28b5"
+	// deviceID 不再全局共享：每账号持久化唯一值（见 Store.EnsureDeviceID），
+	// 避免多账号同设备ID 被风控关联。桌面版从注册表 MachineGuid 读取。
 )
 
 // Client llm-proxy 客户端。
@@ -31,18 +33,13 @@ type Client struct {
 }
 
 // NewClient 构造客户端。timeout 为整体超时，headerTimeout 控制首字节等待。
+// Transport 走 uTLS Chrome 指纹，TLS 层不再暴露 Go 标准库特征。
 func NewClient(base string, timeout, headerTimeout, idleTimeout time.Duration) *Client {
 	if strings.TrimSpace(base) == "" {
 		base = ProxyBase
 	}
 	base = strings.TrimRight(base, "/")
-	tr := &http.Transport{
-		MaxIdleConns:          64,
-		MaxIdleConnsPerHost:   16,
-		IdleConnTimeout:       orDur(idleTimeout, 300*time.Second),
-		ResponseHeaderTimeout: orDur(headerTimeout, 120*time.Second),
-		ForceAttemptHTTP2:     true,
-	}
+	tr := newFingerprintTransport(orDur(idleTimeout, 300*time.Second), orDur(headerTimeout, 120*time.Second))
 	return &Client{Base: base, HTTP: &http.Client{Transport: tr, Timeout: orDur(timeout, 180*time.Second)}}
 }
 
@@ -78,6 +75,7 @@ type BuildParams struct {
 	Model       string
 	Messages    []OAIMessage
 	System      string // 客户端显式 system（会被折进消息，不覆盖 body.system）
+	ConvID      string // 会话粘性键；非空则复用 conv_id，避免每次请求都新建会话
 	MaxTokens   int
 	Temperature *float64
 	Stream      bool
@@ -86,11 +84,18 @@ type BuildParams struct {
 }
 
 // headers 返回桌面版 HttpAiProvider 发往 /llm/stream 的精确头集合。
-func headers(token string) map[string]string {
+// deviceID 由调用方按账号传入，确保每账号唯一设备指纹。
+func headers(token, deviceID string) map[string]string {
+	if strings.TrimSpace(deviceID) == "" {
+		// 防御：未提供设备ID时按 token 派生，至少不跨账号共享同一指纹。
+		h := sha256.Sum256([]byte(token))
+		deviceID = hex.EncodeToString(h[:16])
+	}
 	return map[string]string{
 		"Authorization":      "Bearer " + token,
 		"Content-Type":       "application/json",
 		"Accept":             "text/event-stream",
+		"Accept-Language":    "en-US,en;q=0.9",
 		"User-Agent":         UserAgent,
 		"verdent-proxy-beta": betaHeader,
 		"X-Device-Id":        deviceID,
@@ -148,8 +153,10 @@ func contentString(raw json.RawMessage) string {
 // appMsg 构造 App 形态消息：content 是文本块数组，首块为 <timestamp>，
 // 最后一条消息的最后一块带 cache_control。
 func appMsg(role string, texts []string, model string, last bool) map[string]interface{} {
-	off := time.Now().Format("-0700")
-	ts := "<timestamp>" + time.Now().Format("Mon Jan 02 2006 15:04:05 GMT") + off + "</timestamp>\n"
+	cst := time.FixedZone("CST", 8*3600) // 固定 +0800，避免暴露服务器实际时区
+	now := time.Now().In(cst)
+	off := now.Format("-0700")
+	ts := "<timestamp>" + now.Format("Mon Jan 02 2006 15:04:05 GMT") + off + "</timestamp>\n"
 	blocks := []map[string]interface{}{{"type": "text", "text": ts}}
 	for _, t := range texts {
 		blocks = append(blocks, map[string]interface{}{"type": "text", "text": t})
@@ -273,7 +280,11 @@ func (c *Client) BuildBody(p BuildParams) (map[string]json.RawMessage, error) {
 	}
 	body["model"] = jraw(p.Model)
 	body["session_id"] = jraw("session_" + uuidv4())
-	body["conv_id"] = jraw("conv_" + uuidv4())
+	conv := p.ConvID
+	if conv == "" {
+		conv = uuidv4()
+	}
+	body["conv_id"] = jraw("conv_" + conv)
 	body["react_id"] = jraw("model_agent_" + uuidv4())
 	body["react_type"] = jraw("Main Agent")
 	body["stream"] = jraw(p.Stream)
@@ -306,7 +317,8 @@ func (c *Client) BuildBody(p BuildParams) (map[string]json.RawMessage, error) {
 }
 
 // Stream POST /llm/stream，返回上游响应（调用方负责关闭 Body）。
-func (c *Client) Stream(ctx context.Context, token string, body map[string]json.RawMessage) (*http.Response, error) {
+// deviceID 按账号传入，用于 X-Device-Id 头，确保每账号唯一设备指纹。
+func (c *Client) Stream(ctx context.Context, token, deviceID string, body map[string]json.RawMessage) (*http.Response, error) {
 	data, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -315,7 +327,7 @@ func (c *Client) Stream(ctx context.Context, token string, body map[string]json.
 	if err != nil {
 		return nil, err
 	}
-	for k, v := range headers(token) {
+	for k, v := range headers(token, deviceID) {
 		req.Header.Set(k, v)
 	}
 	resp, err := c.HTTP.Do(req)
