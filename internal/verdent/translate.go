@@ -79,18 +79,41 @@ func (t *Translator) StreamTo(emit func([]byte)) (Usage, error) {
 			if _, ok := tools[ev.ToolIndex]; !ok {
 				toolOrder = append(toolOrder, ev.ToolIndex)
 			}
-			tools[ev.ToolIndex] = &toolAcc{id: ev.ToolID, name: ev.ToolName}
-			if tools[ev.ToolIndex].id == "" {
-				tools[ev.ToolIndex].id = "call_" + uuidv4()[:12]
+			id := ev.ToolID
+			if id == "" {
+				id = "call_" + uuidv4()[:12]
 			}
+			tools[ev.ToolIndex] = &toolAcc{id: id, name: ev.ToolName}
+			emit(t.chunk(map[string]interface{}{
+				"tool_calls": []map[string]interface{}{{
+					"index": ev.ToolIndex,
+					"id":    id,
+					"type":  "function",
+					"function": map[string]interface{}{
+						"name":      ev.ToolName,
+						"arguments": "",
+					},
+				}},
+			}, nil))
 		case "tool_args":
 			ta := tools[ev.ToolIndex]
 			if ta == nil {
-				ta = &toolAcc{id: "call_" + uuidv4()[:12]}
+				id := "call_" + uuidv4()[:12]
+				ta = &toolAcc{id: id}
 				tools[ev.ToolIndex] = ta
 				toolOrder = append(toolOrder, ev.ToolIndex)
 			}
 			ta.args += ev.ToolArgs
+			if ev.ToolArgs != "" {
+				emit(t.chunk(map[string]interface{}{
+					"tool_calls": []map[string]interface{}{{
+						"index": ev.ToolIndex,
+						"function": map[string]interface{}{
+							"arguments": ev.ToolArgs,
+						},
+					}},
+				}, nil))
+			}
 		case "message_delta":
 			if ev.OutputTokens > 0 {
 				usage.Out = ev.OutputTokens
@@ -108,22 +131,7 @@ func (t *Translator) StreamTo(emit func([]byte)) (Usage, error) {
 	if len(reasoning) > 0 {
 		emit(t.chunk(map[string]interface{}{"reasoning_content": string(reasoning)}, nil))
 	}
-	// 工具调用汇总 chunk。
 	if len(toolOrder) > 0 {
-		calls := make([]map[string]interface{}, 0, len(toolOrder))
-		for i, idx := range toolOrder {
-			ta := tools[idx]
-			calls = append(calls, map[string]interface{}{
-				"index": i,
-				"id":    ta.id,
-				"type":  "function",
-				"function": map[string]interface{}{
-					"name":      ta.name,
-					"arguments": ta.args,
-				},
-			})
-		}
-		emit(t.chunk(map[string]interface{}{"tool_calls": calls}, nil))
 		finish = "tool_calls"
 	}
 	// finish chunk + [DONE]。
