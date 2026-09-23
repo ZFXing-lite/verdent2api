@@ -1,30 +1,20 @@
 {
   "listen": ":7866",
   "api_key": "",
-  "key_file": "./auths/verdent-keys.json",
+  "auth_file": "./auths/accounts.json",
   "state_file": "./data/state.json",
+  "catalog_file": "",
+  "free_only": true,
   "upstream": {
-    "base_url": "https://api.verdent.ai",
-    "timeout_seconds": 120,
+    "base_url": "https://llm-proxy.verdent.ai",
+    "timeout_seconds": 180,
     "header_timeout_seconds": 120,
-    "idle_timeout_seconds": 300,
-    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+    "idle_timeout_seconds": 300
   },
   "pool": {
-    "max_in_flight": 3,
     "err_threshold": 5,
     "err_cooldown": "10m",
     "rate_cooldown": "60s",
-    "credit_cooldown": "12h",
-    "select_jitter_ms": 100
-  },
-  "scheduler": {
-    "keepalive_minutes": 30,
-    "enabled": true
-  },
-  "model_map": {},
-  "model_alias": {},
-  "features": {
-    "strip_reasoning": true
+    "credit_cooldown": "1h"
   }
 }

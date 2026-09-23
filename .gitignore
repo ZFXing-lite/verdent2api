@@ -1,9 +1,8 @@
 # 二进制与本地产物
 /bin/
 /data/
-/auths/verdent-keys.json
-/auths/*.json
-!/auths/verdent-keys.example.json
+/auths/*
+!/auths/.gitkeep
 config.json
-smoke.json
 *.log
+*.tmp

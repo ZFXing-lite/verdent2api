@@ -4,102 +4,78 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
-
-	"verdent2api/internal/pool"
 )
 
-// statusResp /status 响应体。
-type statusResp struct {
-	Version    string    `json:"version"`
-	Upstream   string    `json:"upstream"`
-	Now        time.Time `json:"now"`
-	Total      int       `json:"total_keys"`
-	Healthy    int       `json:"healthy_keys"`
-	Disabled   int       `json:"disabled_keys"`
-	Cooldown   int       `json:"cooldown_keys"`
-	InFlight   int       `json:"in_flight"`
-	TotalReqs  int64     `json:"total_requests"`
-	TotalOK    int64     `json:"total_ok"`
-	TotalInTok int64     `json:"total_prompt_tokens"`
-	TotalOutTk int64     `json:"total_completion_tokens"`
-	Keys       []keyInfo `json:"keys"`
+func (s *Server) writeErr(w http.ResponseWriter, status int, errType, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"error": map[string]interface{}{
+			"message": msg,
+			"type":    errType,
+			"param":   nil,
+			"code":    errType,
+		},
+	})
 }
 
-type keyInfo struct {
-	Label          string     `json:"label"`
-	Key            string     `json:"key"`
-	State          string     `json:"state"`
-	CooldownUntil  *time.Time `json:"cooldown_until,omitempty"`
-	DisabledReason string     `json:"disabled_reason,omitempty"`
-	ReqCount       int64      `json:"req_count"`
-	OkCount        int64      `json:"ok_count"`
-	ErrCount       int        `json:"err_count"`
-	InFlight       int        `json:"in_flight"`
-	LastUsed       *time.Time `json:"last_used,omitempty"`
-	LastErr        string     `json:"last_err,omitempty"`
-}
-
-// status 输出账号池快照（key 脱敏）。
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	states := s.Pool.Snapshot()
-	resp := statusResp{
-		Version:  s.Version,
-		Upstream: s.Client.BaseURL,
-		Now:      time.Now(),
-		Keys:     make([]keyInfo, 0, len(states)),
-	}
 	now := time.Now()
+	resp := map[string]interface{}{
+		"version":  s.Version,
+		"upstream": s.Client.Base,
+		"now":      now,
+	}
+	keys := make([]map[string]interface{}, 0, len(states))
+	var healthy, disabled, cooldown int
+	var reqs, okc, tin, tout int64
 	for _, st := range states {
 		state := "healthy"
 		switch {
 		case st.Disabled:
 			state = "disabled"
-			resp.Disabled++
+			disabled++
 		case !st.CooldownUntil.IsZero() && now.Before(st.CooldownUntil):
 			state = "cooldown"
-			resp.Cooldown++
+			cooldown++
 		default:
-			resp.Healthy++
+			healthy++
 		}
-		resp.Total++
-		resp.TotalReqs += st.ReqCount
-		resp.TotalOK += st.OkCount
-		resp.TotalInTok += st.TotalIn
-		resp.TotalOutTk += st.TotalOut
-		resp.InFlight += inflightOf(st.APIKey)
-
-		ki := keyInfo{
-			Label:          st.Label,
-			Key:            maskKey(st.APIKey),
-			State:          state,
-			DisabledReason: st.DisabledReason,
-			ReqCount:       st.ReqCount,
-			OkCount:        st.OkCount,
-			ErrCount:       st.ErrCount,
-			InFlight:       inflightOf(st.APIKey),
-			LastErr:        st.LastErr,
+		reqs += st.ReqCount
+		okc += st.OkCount
+		tin += st.TotalIn
+		tout += st.TotalOut
+		item := map[string]interface{}{
+			"id":        maskID(st.ID),
+			"label":     st.Label,
+			"state":     state,
+			"req_count": st.ReqCount,
+			"ok_count":  st.OkCount,
+			"err_count": st.ErrCount,
+			"last_err":  st.LastErr,
 		}
 		if !st.CooldownUntil.IsZero() {
-			t := st.CooldownUntil
-			ki.CooldownUntil = &t
+			item["cooldown_until"] = st.CooldownUntil
 		}
-		if !st.LastUsed.IsZero() {
-			t := st.LastUsed
-			ki.LastUsed = &t
-		}
-		resp.Keys = append(resp.Keys, ki)
+		keys = append(keys, item)
 	}
+	resp["total_accounts"] = len(states)
+	resp["healthy_accounts"] = healthy
+	resp["disabled_accounts"] = disabled
+	resp["cooldown_accounts"] = cooldown
+	resp["total_requests"] = reqs
+	resp["total_ok"] = okc
+	resp["total_prompt_tokens"] = tin
+	resp["total_completion_tokens"] = tout
+	resp["accounts"] = keys
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func inflightOf(apiKey string) int {
-	return pool.InFlightCount(apiKey)
-}
-
-func maskKey(k string) string {
-	if len(k) <= 12 {
-		return "***"
+func maskID(id string) string {
+	if len(id) <= 16 {
+		return id
 	}
-	return k[:6] + "..." + k[len(k)-4:]
+	return id[:8] + "..." + id[len(id)-4:]
 }

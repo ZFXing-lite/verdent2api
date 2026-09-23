@@ -1,0 +1,22 @@
+[
+  {
+    "key": "deepseek-v4.1-flash-free",
+    "display_name": "DeepSeek V4.1 Flash (Free)",
+    "provider": "deepseek",
+    "description": "限免模型，不消耗 credits（Free mode）",
+    "context_window_tokens": 128000,
+    "default_max_output_tokens": 8192,
+    "supports_thinking": true,
+    "is_limit_free": true
+  },
+  {
+    "key": "glm-5.3-flash-free",
+    "display_name": "GLM 5.3 Flash (Free)",
+    "provider": "zhipu",
+    "description": "限免模型，不消耗 credits（Free mode）",
+    "context_window_tokens": 128000,
+    "default_max_output_tokens": 8192,
+    "supports_thinking": false,
+    "is_limit_free": true
+  }
+]
