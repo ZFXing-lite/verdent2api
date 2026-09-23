@@ -48,9 +48,11 @@ func NewPKCE() (*PKCEChallenge, error) {
 	return &PKCEChallenge{Verifier: verifier, Challenge: challenge, State: state, DeviceID: dev}, nil
 }
 
-// AuthorizeURL 构造浏览器登录 URL（ots/source=deck 表示桌面端来源）。
+// AuthorizeURL 构造浏览器登录 URL。
+// 不能带 source=deck：登录页对 deck 来源只放行 localhost/127.0.0.1/0.0.0.0，
+// 其它回调会被判无效并在 /auth 与 /login 之间反复跳转。
 func (c *PKCEChallenge) AuthorizeURL(callback string) string {
-	return fmt.Sprintf("%s/auth?challenge=%s&state=%s&intent=signin&callback=%s&ots=deck&source=deck&id=%s",
+	return fmt.Sprintf("%s/auth?challenge=%s&state=%s&intent=signin&callback=%s&ots=deck&source=pc&id=%s",
 		wwwOrigin, urlEncode(c.Challenge), urlEncode(c.State), urlEncode(callback), urlEncode(c.DeviceID))
 }
 
@@ -59,14 +61,14 @@ type pkceResp struct {
 	ErrCode int    `json:"errCode"`
 	ErrMsg  string `json:"errMsg"`
 	Data    struct {
-		Token                 string      `json:"token"`
-		AccessToken           string      `json:"accessToken"`
-		AccessTokenAlt        string      `json:"access_token"`
-		RefreshToken          string      `json:"refreshToken"`
-		RefreshTokenAlt       string      `json:"refresh_token"`
-		ExpireTime            json.Number `json:"expireTime"`
-		AccessTokenExpiresAt  json.Number `json:"accessTokenExpiresAt"`
-		UserID                json.Number `json:"userId"`
+		Token                string      `json:"token"`
+		AccessToken          string      `json:"accessToken"`
+		AccessTokenAlt       string      `json:"access_token"`
+		RefreshToken         string      `json:"refreshToken"`
+		RefreshTokenAlt      string      `json:"refresh_token"`
+		ExpireTime           json.Number `json:"expireTime"`
+		AccessTokenExpiresAt json.Number `json:"accessTokenExpiresAt"`
+		UserID               json.Number `json:"userId"`
 	} `json:"data"`
 }
 
