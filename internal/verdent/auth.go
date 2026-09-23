@@ -9,9 +9,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 	"time"
+
+	fhttp "github.com/bogdanfinn/fhttp"
+	tls_client "github.com/bogdanfinn/tls-client"
 )
 
 // 逆向常量（桌面版 app.asar，与参考实现一致）。
@@ -52,7 +54,7 @@ func NewPKCE() (*PKCEChallenge, error) {
 // 不能带 source=deck：登录页对 deck 来源只放行 localhost/127.0.0.1/0.0.0.0，
 // 其它回调会被判无效并在 /auth 与 /login 之间反复跳转。
 func (c *PKCEChallenge) AuthorizeURL(callback string) string {
-	return fmt.Sprintf("%s/auth?challenge=%s&state=%s&intent=signin&callback=%s&ots=deck&source=pc&id=%s",
+	return fmt.Sprintf("%s/auth?challenge=%s&state=%s&intent=signin&callback=%s&ot=deck&source=pc&id=%s",
 		wwwOrigin, urlEncode(c.Challenge), urlEncode(c.State), urlEncode(callback), urlEncode(c.DeviceID))
 }
 
@@ -73,7 +75,7 @@ type pkceResp struct {
 }
 
 // ExchangeCode 用授权码 + code_verifier 换 token，返回可入库的 Account。
-func ExchangeCode(ctx context.Context, hc *http.Client, code, verifier string) (*Account, error) {
+func ExchangeCode(ctx context.Context, hc tls_client.HttpClient, code, verifier string) (*Account, error) {
 	body, _ := json.Marshal(map[string]string{"code": code, "codeVerifier": verifier})
 	resp, err := postJSON(ctx, hc, loginOrigin+"/passport/pkce/callback", body)
 	if err != nil {
@@ -104,7 +106,7 @@ func ExchangeCode(ctx context.Context, hc *http.Client, code, verifier string) (
 }
 
 // Refresh 用 refresh_token 换新的 access token（refresh token 会轮换）。
-func Refresh(ctx context.Context, hc *http.Client, a *Account) (*Account, error) {
+func Refresh(ctx context.Context, hc tls_client.HttpClient, a *Account) (*Account, error) {
 	if strings.TrimSpace(a.RefreshToken) == "" {
 		return nil, fmt.Errorf("no refresh token")
 	}
@@ -134,8 +136,8 @@ func Refresh(ctx context.Context, hc *http.Client, a *Account) (*Account, error)
 	return &out, nil
 }
 
-func postJSON(ctx context.Context, hc *http.Client, url string, body []byte) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(body)))
+func postJSON(ctx context.Context, hc tls_client.HttpClient, url string, body []byte) ([]byte, error) {
+	req, err := fhttp.NewRequestWithContext(ctx, fhttp.MethodPost, url, strings.NewReader(string(body)))
 	if err != nil {
 		return nil, err
 	}

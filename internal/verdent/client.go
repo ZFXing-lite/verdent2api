@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 	"time"
+
+	fhttp "github.com/bogdanfinn/fhttp"
+	tls_client "github.com/bogdanfinn/tls-client"
 
 	"verdent2api/internal/crypto"
 )
@@ -29,18 +31,17 @@ const (
 // Client llm-proxy 客户端。
 type Client struct {
 	Base string
-	HTTP *http.Client
+	HTTP tls_client.HttpClient
 }
 
-// NewClient 构造客户端。timeout 为整体超时，headerTimeout 控制首字节等待。
-// Transport 走 uTLS Chrome 指纹，TLS 层不再暴露 Go 标准库特征。
+// NewClient 构造客户端。timeout 为整体超时。
+// HTTP 走 tls-client Chrome 完整指纹（TLS JA3 + HTTP/2 + 头顺序），传输层不再暴露 Go 特征。
 func NewClient(base string, timeout, headerTimeout, idleTimeout time.Duration) *Client {
 	if strings.TrimSpace(base) == "" {
 		base = ProxyBase
 	}
 	base = strings.TrimRight(base, "/")
-	tr := newFingerprintTransport(orDur(idleTimeout, 300*time.Second), orDur(headerTimeout, 120*time.Second))
-	return &Client{Base: base, HTTP: &http.Client{Transport: tr, Timeout: orDur(timeout, 180*time.Second)}}
+	return &Client{Base: base, HTTP: newFingerprintClient(orDur(timeout, 180*time.Second))}
 }
 
 func orDur(d, def time.Duration) time.Duration {
@@ -85,6 +86,7 @@ type BuildParams struct {
 
 // headers 返回桌面版 HttpAiProvider 发往 /llm/stream 的精确头集合。
 // deviceID 由调用方按账号传入，确保每账号唯一设备指纹。
+// 头发送顺序由 transport.go 的 streamHeaderOrder 经 tls-client 固定，不依赖此 map 迭代序。
 func headers(token, deviceID string) map[string]string {
 	if strings.TrimSpace(deviceID) == "" {
 		// 防御：未提供设备ID时按 token 派生，至少不跨账号共享同一指纹。
@@ -318,12 +320,13 @@ func (c *Client) BuildBody(p BuildParams) (map[string]json.RawMessage, error) {
 
 // Stream POST /llm/stream，返回上游响应（调用方负责关闭 Body）。
 // deviceID 按账号传入，用于 X-Device-Id 头，确保每账号唯一设备指纹。
-func (c *Client) Stream(ctx context.Context, token, deviceID string, body map[string]json.RawMessage) (*http.Response, error) {
+// 响应为 *fhttp.Response（tls-client），Body 是 io.ReadCloser，与翻译层兼容。
+func (c *Client) Stream(ctx context.Context, token, deviceID string, body map[string]json.RawMessage) (*fhttp.Response, error) {
 	data, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.Base+streamPath, bytes.NewReader(data))
+	req, err := fhttp.NewRequestWithContext(ctx, fhttp.MethodPost, c.Base+streamPath, bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}

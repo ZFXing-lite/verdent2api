@@ -12,6 +12,9 @@ import (
 	"strings"
 	"time"
 
+	fhttp "github.com/bogdanfinn/fhttp"
+	tls_client "github.com/bogdanfinn/tls-client"
+
 	"verdent2api/internal/pool"
 	"verdent2api/internal/verdent"
 )
@@ -26,7 +29,7 @@ type Server struct {
 	FreeOnly bool
 	Version  string
 	// HTTP 供 token refresh 使用。
-	HTTP *http.Client
+	HTTP tls_client.HttpClient
 }
 
 // Register 注册路由。
@@ -203,7 +206,7 @@ func (s *Server) tokenFor(ctx context.Context, id string) (string, string, error
 }
 
 // relay 翻译 hybrid-stream SSE 为 OpenAI 格式并转发。
-func (s *Server) relay(w http.ResponseWriter, resp *http.Response, id, model string, wantStream bool) {
+func (s *Server) relay(w http.ResponseWriter, resp *fhttp.Response, id, model string, wantStream bool) {
 	tr := verdent.NewTranslator(resp.Body, model)
 	if wantStream {
 		flusher, ok := w.(http.Flusher)
